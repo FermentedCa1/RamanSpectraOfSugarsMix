@@ -75,8 +75,8 @@ def preprocess_input(spectrum):
 st.set_page_config(page_title="Raman Sugar Analyzer v2.0", layout="wide")
 
 # Đường dẫn file (Đại ca kiểm tra lại các đường dẫn này nhé)
-METADATA_PATH = r'D:\Raman_Sugars-main\Raman_Sugars-main\Sugar_Concentrations.csv'
-MODEL_PATH = r'D:\raman_resnet_v2.pth'  # Dùng bản v2 mới train xong
+METADATA_PATH = 'Sugar_Concentrations.csv'
+MODEL_PATH = 'raman_resnet_v2.pth'  # Dùng bản v2 mới train xong
 
 
 @st.cache_resource
@@ -209,4 +209,5 @@ else:
     # Màn hình chào mừng khi chưa có file
     st.info("👋 Chào đại ca! Vui lòng tải file CSV spectra vào thanh bên để bắt đầu phân tích.")
     st.image("https://upload.wikimedia.org/wikipedia/commons/b/be/Raman_spectrometer_schematic.png",
+
              caption="Sơ đồ nguyên lý máy Quang phổ Raman", width=600)
