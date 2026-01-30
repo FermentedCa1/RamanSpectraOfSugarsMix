@@ -72,7 +72,7 @@ def preprocess_input(spectrum):
 
 
 # --- 3. CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(page_title="Raman Sugar Analyzer v2.0", layout="wide")
+st.set_page_config(page_title="Raman Sugar Analyzer v2.1", layout="wide")
 
 # Đường dẫn file (Đại ca kiểm tra lại các đường dẫn này nhé)
 METADATA_PATH = 'Sugar_Concentrations.csv'
@@ -211,3 +211,4 @@ else:
     st.image("https://upload.wikimedia.org/wikipedia/commons/b/be/Raman_spectrometer_schematic.png",
 
              caption="Sơ đồ nguyên lý máy Quang phổ Raman", width=600)
+
