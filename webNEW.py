@@ -101,7 +101,7 @@ except Exception as e:
     st.error(f"⚠️ Lỗi nạp file hệ thống: {e}. Vui lòng kiểm tra đường dẫn file .pth và .csv")
     st.stop()
 
-st.title("🔬 Hệ thống Phân tích Nồng độ Đường v2.0")
+st.title("🔬 Hệ thống Phân tích Nồng độ Đường v2.1")
 st.caption("Ứng dụng Deep Learning (ResNet 1D) trong phân tích quang phổ Raman")
 st.markdown("---")
 
@@ -211,4 +211,5 @@ else:
     st.image("https://upload.wikimedia.org/wikipedia/commons/b/be/Raman_spectrometer_schematic.png",
 
              caption="Sơ đồ nguyên lý máy Quang phổ Raman", width=600)
+
 
