@@ -4,12 +4,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
-import seaborn as sns
 from scipy.signal import savgol_filter
 from scipy.ndimage import median_filter
 
-
-# --- 1. KIẾN TRÚC MẠNG RESNET (Giữ nguyên cấu trúc hịn) ---
+# ==========================================
+# 1. KIẾN TRÚC MẠNG RESNET (Giữ nguyên cấu trúc v2.1)
+# ==========================================
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(ResidualBlock, self).__init__()
@@ -26,10 +26,8 @@ class ResidualBlock(nn.Module):
                 nn.Conv1d(in_channels, out_channels, kernel_size=1),
                 nn.BatchNorm1d(out_channels)
             )
-
     def forward(self, x):
         return torch.relu(self.conv(x) + self.shortcut(x))
-
 
 class RamanResNet(nn.Module):
     def __init__(self, num_targets=4):
@@ -47,90 +45,87 @@ class RamanResNet(nn.Module):
             nn.ReLU(),
             nn.Linear(64, num_targets)
         )
-
     def forward(self, x):
         features = self.feature_extractor(x)
         return self.regressor(features)
 
-
-# --- 2. HÀM TIỀN XỬ LÝ (Đồng bộ 100% với Train 2.0) ---
+# ==========================================
+# 2. HÀM TIỀN XỬ LÝ (Chuẩn hóa v2.1)
+# ==========================================
 def preprocess_input(spectrum):
-    # 1. Khử gai nhiễu (size=3 là chuẩn cho 1D)
-    spectrum_clean = median_filter(spectrum, size=3)
-    x_values = spectrum_clean.reshape(1, -1)
-
-    # 2. Savgol Filter (window=15, poly=3)
-    d1 = savgol_filter(x_values, window_length=15, polyorder=3, deriv=1)
-    d2 = savgol_filter(x_values, window_length=15, polyorder=3, deriv=2)
+    # 1. Lọc gai nhiễu
+    clean = median_filter(spectrum, size=3)
+    x = clean.reshape(1, -1)
+    
+    # 2. Đạo hàm Savitzky-Golay
+    d1 = savgol_filter(x, window_length=15, polyorder=3, deriv=1)
+    d2 = savgol_filter(x, window_length=15, polyorder=3, deriv=2)
 
     # 3. Chuẩn hóa SNV
     def snv(data):
         return (data - np.mean(data, axis=1, keepdims=True)) / (np.std(data, axis=1, keepdims=True) + 1e-8)
 
-    x_processed = np.stack([snv(x_values), snv(d1), snv(d2)], axis=1)
-    return torch.tensor(x_processed, dtype=torch.float32)
+    x_proc = np.stack([snv(x), snv(d1), snv(d2)], axis=1)
+    return torch.tensor(x_proc, dtype=torch.float32)
 
+# ==========================================
+# 3. CẤU HÌNH HỆ THỐNG
+# ==========================================
+st.set_page_config(page_title="Raman Sugar Pro v2.1", layout="wide")
 
-# --- 3. CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(page_title="Raman Sugar Analyzer v2.1", layout="wide")
-
-# Đường dẫn file (Đại ca kiểm tra lại các đường dẫn này nhé)
+MODEL_PATH = 'raman_resnet_v2.1.pth' # Đường dẫn bản v2.1 đại ca vừa train
 METADATA_PATH = 'Sugar_Concentrations.csv'
-MODEL_PATH = 'raman_resnet_v2.pth'  # Dùng bản v2 mới train xong
-
 
 @st.cache_resource
-def load_my_model():
+def load_model():
     model = RamanResNet(num_targets=4)
-    # Map location CPU để chạy được trên mọi máy không cần GPU
     model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu')))
     model.eval()
     return model
 
-
 @st.cache_data
-def load_metadata():
+def load_meta():
     return pd.read_csv(METADATA_PATH)
 
-
-# Khởi tạo model và data
+# Khởi tạo
 try:
-    model = load_my_model()
-    df_meta = load_metadata()
+    model = load_model()
+    df_meta = load_meta()
 except Exception as e:
-    st.error(f"⚠️ Lỗi nạp file hệ thống: {e}. Vui lòng kiểm tra đường dẫn file .pth và .csv")
+    st.error(f"⚠️ Lỗi nạp file: {e}. Đại ca check lại file .pth và .csv nhé!")
     st.stop()
 
-st.title("🔬 Hệ thống Phân tích Nồng độ Đường v2.1")
-st.caption("Ứng dụng Deep Learning (ResNet 1D) trong phân tích quang phổ Raman")
+# Giao diện chính
+st.title("🔬 Hệ thống Phân tích Đa thành phần Đường v2.1")
 st.markdown("---")
 
-# --- 4. SIDEBAR ĐIỀU KHIỂN ---
-st.sidebar.header("🛠 Bảng điều khiển")
-uploaded_file = st.sidebar.file_uploader("Tải file phổ (.csv) lên", type="csv")
+# ==========================================
+# 4. SIDEBAR ĐIỀU KHIỂN
+# ==========================================
+st.sidebar.header("📂 Dữ liệu đầu vào")
+uploaded_file = st.sidebar.file_uploader("Tải file Spectra (.csv)", type="csv")
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.sidebar.success("✅ Đã nạp file spectra!")
+if uploaded_file:
+    df_spec = pd.read_csv(uploaded_file)
+    all_samples = df_spec.columns[1:].tolist()
+    selected_sample = st.sidebar.selectbox("🎯 Chọn mẫu phân tích:", all_samples)
+    
+    spectrum = df_spec[selected_sample].values
+    wavenumbers = df_spec.iloc[:, 0].values
 
-    all_samples = df.columns[1:].tolist()
-    selected_sample = st.sidebar.selectbox("🎯 Chọn mẫu để phân tích:", all_samples)
-
-    # Lấy dữ liệu
-    spectrum = df[selected_sample].values
-    wavenumbers = df.iloc[:, 0].values
-
-    # --- 5. BỐ CỤC CHÍNH ---
-    col_plot, col_res = st.columns([1.2, 1])
+    # ==========================================
+    # 5. HIỂN THỊ VÀ DỰ ĐOÁN
+    # ==========================================
+    col_plot, col_res = st.columns([1.3, 1])
 
     with col_plot:
-        st.subheader(f"📈 Phân tích Phổ: {selected_sample}")
+        st.subheader(f"📈 Phổ Raman: {selected_sample}")
         fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(wavenumbers, spectrum, color='#1f77b4', lw=1.2, label='Raw Signal')
-        # Vẽ thêm phổ đã qua lọc median để đại ca thấy sự khác biệt
+        # Vẽ phổ gốc và phổ đã lọc để so sánh độ "sạch"
+        ax.plot(wavenumbers, spectrum, color='lightgray', lw=1, label='Raw Signal', alpha=0.5)
         spectrum_clean = median_filter(spectrum, size=3)
-        ax.plot(wavenumbers, spectrum_clean, color='#ff7f0e', lw=0.8, alpha=0.6, label='Median Filtered')
-
+        ax.plot(wavenumbers, spectrum_clean, color='#008080', lw=1.5, label='Processed (Median Filter)')
+        
         ax.set_xlabel("Wavenumber (cm-1)")
         ax.set_ylabel("Intensity")
         ax.legend()
@@ -138,20 +133,19 @@ if uploaded_file is not None:
         st.pyplot(fig)
 
     with col_res:
-        st.subheader("📊 Kết quả Đối soát nồng độ")
-
-        # --- DỰ ĐOÁN ---
+        st.subheader("📊 Kết quả Phân tích AI")
+        
+        # --- CHẠY AI ---
         input_tensor = preprocess_input(spectrum)
         with torch.no_grad():
-            preds_scaled = model(input_tensor).numpy()[0]
-            # QUY ĐỔI NGƯỢC: Nhân với 375 vì model v2 train trên dải 0-1
-            preds = np.maximum(preds_scaled * 375.0, 0)
+            pred_scaled = model(input_tensor).numpy()[0]
+            # Quy đổi nồng độ (0-1 -> 0-375ul)
+            preds = np.maximum(pred_scaled * 375.0, 0)
 
-            # Ràng buộc vật lý
-            if np.sum(preds) > 375:
-                preds = (preds / np.sum(preds)) * 375
-
-        # --- TRUY XUẤT THỰC TẾ ---
+        # --- ĐỐI CHIẾU METADATA ---
+        sugars = ["Sucrose", "Fructose", "Maltose", "Glucose"]
+        target_cols = ['Sucrose [ul]', 'Fructose [ul]', 'Maltose [ul]', 'Glucose [ul]']
+        
         try:
             parts = selected_sample.split('_')
             cell_id = f"{parts[4]}_{parts[5]}"
@@ -159,57 +153,59 @@ if uploaded_file is not None:
         except:
             truth_row = pd.DataFrame()
 
-        sugars = ["Sucrose", "Fructose", "Maltose", "Glucose"]
-
         if not truth_row.empty:
-            actuals = [truth_row[f'{s} [ul]'].values[0] for s in sugars]
-
-            # Vẽ biểu đồ cột so sánh cho "hịn"
+            actuals = truth_row[target_cols].values[0]
+            
+            # Vẽ biểu đồ so sánh cột
             fig_bar, ax_bar = plt.subplots(figsize=(8, 5))
             x = np.arange(len(sugars))
             width = 0.35
-            ax_bar.bar(x - width / 2, actuals, width, label='Thực tế', color='#2ca02c', alpha=0.7)
-            ax_bar.bar(x + width / 2, preds, width, label='AI Dự đoán', color='#d62728', alpha=0.7)
+            ax_bar.bar(x - width/2, actuals, width, label='Thực tế (Metadata)', color='#2E8B57', alpha=0.8)
+            ax_bar.bar(x + width/2, preds, width, label='AI Dự đoán', color='#CD5C5C', alpha=0.8)
             ax_bar.set_xticks(x)
             ax_bar.set_xticklabels(sugars)
             ax_bar.set_ylabel("Thể tích (µl)")
             ax_bar.legend()
             st.pyplot(fig_bar)
 
-            # Bảng số liệu chi tiết
+            # Bảng so sánh
             compare_df = pd.DataFrame({
-                "Loại đường": sugars,
-                "Thực tế (µl)": [f"{v:.1f}" for v in actuals],
-                "AI đoán (µl)": [f"{v:.1f}" for v in preds],
-                "Lệch": [f"{p - a:+.1f}" for a, p in zip(actuals, preds)]
+                "Thành phần": sugars,
+                "Thực tế": [f"{v:.2f}" for v in actuals],
+                "AI Dự đoán": [f"{v:.2f}" for v in preds],
+                "Lệch (Error)": [f"{p - a:+.2f}" for a, p in zip(actuals, preds)]
             })
             st.table(compare_df)
-
-            err = np.mean(np.abs(preds - np.array(actuals)))
-            st.success(f"💎 Sai số trung bình (MAE): {err:.2f} µl")
+            
+            mae_sample = np.mean(np.abs(preds - actuals))
+            st.info(f"💡 Sai số trung bình của mẫu này: **{mae_sample:.2f} µl**")
         else:
-            st.warning(f"⚠️ Không tìm thấy Metadata cho mã: {cell_id}")
-            # Nếu không có metadata thì chỉ hiện Progress Bar dự đoán
-            for name, val in zip(sugars, preds):
-                st.write(f"**{name}**: {val:.1f} µl")
-                st.progress(min(float(val / 375.0), 1.0))
+            st.warning(f"⚠️ Không tìm thấy nhãn thực tế cho Cell ID: {cell_id}")
+            for s, p in zip(sugars, preds):
+                st.metric(label=s, value=f"{p:.2f} µl")
 
-        # --- CHỈ SỐ MODEL ---
-        with st.expander("📝 Thông tin kỹ thuật & Metrics"):
-            st.write("**Model:** ResNet-1D v2.0 (Cleaned Data)")
-            st.write("**Preprocessing:** Median Filter (3) -> Savgol (15,3) -> SNV")
-            metrics = pd.DataFrame({
-                "Đường": sugars,
-                "Correlation (R)": [0.998, 0.995, 0.997, 0.999],
-                "Trạng thái": ["Ổn định", "Nhạy", "Ổn định", "Rất tốt"]
-            })
-            st.table(metrics)
+    # ==========================================
+    # 6. PHẦN "KHÈ" HỘI ĐỒNG (HIỆU NĂNG V2.1)
+    # ==========================================
+    st.markdown("---")
+    with st.expander("🔬 Thông số kỹ thuật & Hiệu năng mô hình v2.1 (Batch Test Results)"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Quy trình xử lý:**")
+            st.code("Median Filter (3) -> Savgol (15, 3, deriv=1&2) -> SNV Normalization")
+            st.write("**Kiến trúc:** 1D-ResNet với Residual Blocks (Skip Connections)")
+        
+        with col2:
+            st.write("**Đánh giá tổng quát trên tập Test:**")
+            # Cập nhật đúng các con số đại ca vừa test xong nhé!
+            metrics_data = {
+                "Loại đường": sugars,
+                "MAE (µl)": [2.77, 2.59, 2.76, 4.41],
+                "Correlation (R)": [0.9927, 0.9967, 0.9964, 0.9931]
+            }
+            st.table(pd.DataFrame(metrics_data))
+            st.success("🎯 Sai số trung bình hệ thống: 3.13 µl")
 
 else:
-    # Màn hình chào mừng khi chưa có file
-    st.info("👋 Chào đại ca! Vui lòng tải file CSV spectra vào thanh bên để bắt đầu phân tích.")
-    st.image("https://upload.wikimedia.org/wikipedia/commons/b/be/Raman_spectrometer_schematic.png",
-
-             caption="Sơ đồ nguyên lý máy Quang phổ Raman", width=600)
-
-
+    st.info("👋 Chào đại ca! Vui lòng tải file spectra vào sidebar để bắt đầu soi lỗi và dự đoán nồng độ.")
+    # Chèn một cái ảnh sơ đồ kiến trúc cho chuyên nghiệp
