@@ -175,11 +175,11 @@ if uploaded_file and selected_sample:
             actuals = truth_row[target_cols].values[0]
             compare_df = pd.DataFrame({
                 "Thành phần": sugars,
-                "Thực tế": actuals,
-                "AI Dự đoán": preds,
-                "Lệch": preds - actuals
+                "Thực tế": np.round(actuals, 2),
+                "AI Dự đoán": np.round(preds, 2),
+                "Lệch": np.round(preds - actuals, 2)
             })
-            st.table(compare_df.style.format("{:.2f}"))
+            st.table(compare_df)
             st.success(f"💎 MAE: {np.mean(np.abs(preds-actuals)):.2f} µl")
         else:
             for s, p in zip(sugars, preds):
@@ -194,3 +194,4 @@ if uploaded_file and selected_sample:
         }))
 else:
     st.info("👋 Chào đại ca! Hãy tải file CSV lên để trải nghiệm bộ lọc tìm kiếm mới.")
+
