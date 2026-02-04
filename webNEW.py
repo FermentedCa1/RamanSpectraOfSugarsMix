@@ -189,10 +189,11 @@ if uploaded_file and selected_sample:
     with st.expander("📝 Thông số hiệu năng hệ thống (Model v2.1)"):
         st.table(pd.DataFrame({
             "Đường": sugars,
-            "MAE": [2.77, 2.59, 2.76, 4.41],
-            "R-squared": [0.9927, 0.9967, 0.9964, 0.9931]
+            "MAE": [1,9, 2,15, 2,2, 3,38],
+            "R-squared": [0.9985, 0.9982, 0.998, 0.9954]
         }))
 else:
     st.info("👋 Chào đại ca! Hãy tải file CSV lên để trải nghiệm bộ lọc tìm kiếm mới.")
+
 
 
