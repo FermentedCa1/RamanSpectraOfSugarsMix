@@ -71,7 +71,7 @@ def prepare_data_v2():
     X_raw = df_spec.T  # Xoay ngang: Hàng là Mẫu
 
     # Đọc Metadata để lấy nhãn
-    df_meta = pd.read_csv('Sugar_Concentrations.xlsx - Sheet1 (2).csv')
+    df_meta = pd.read_csv('Sugar_Concentrations.csv')
 
     # --- BƯỚC 1: TRUY TÌM VÀ TRẢM MẪU LỖI ---
     # Quét vùng pixel nghi vấn (ví dụ 1400-1650) để tìm 'cột đình' > 2000
@@ -198,4 +198,5 @@ plt.show()
 
 # Lưu Model "Hịn"
 torch.save(model.state_dict(), 'raman_resnet_v2.pth')
+
 print("\n✅ Đã lưu model v2.0. Đại ca mang sang App dùng ngay cho nóng!")
