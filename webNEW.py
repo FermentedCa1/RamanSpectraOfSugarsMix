@@ -67,7 +67,7 @@ def preprocess_input(spectrum):
 # 3. CẤU HÌNH & LOAD DATA
 # ==========================================
 st.set_page_config(page_title="Raman Analyzer Pro v2.2", layout="wide")
-MODEL_PATH = 'raman_resnet_v2.1.pth'
+MODEL_PATH = 'raman_resnet_experiment.pth'
 METADATA_PATH = 'Sugar_Concentrations.csv'
 
 @st.cache_resource
@@ -194,4 +194,5 @@ if uploaded_file and selected_sample:
         }))
 else:
     st.info("👋 Chào đại ca! Hãy tải file CSV lên để trải nghiệm bộ lọc tìm kiếm mới.")
+
 
