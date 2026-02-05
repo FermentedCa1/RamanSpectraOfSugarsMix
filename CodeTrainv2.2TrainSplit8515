@@ -1,0 +1,182 @@
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.model_selection import train_test_split
+from scipy.signal import savgol_filter
+from scipy.ndimage import median_filter
+import matplotlib.pyplot as plt
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"🚀 Chiến thần đang chạy trên: {device}")
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(ResidualBlock, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(),
+            nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels)
+        )
+        self.shortcut = nn.Sequential()
+        if in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels, out_channels, kernel_size=1),
+                nn.BatchNorm1d(out_channels)
+            )
+
+    def forward(self, x):
+        return torch.relu(self.conv(x) + self.shortcut(x))
+
+class SugarResNet(nn.Module):
+    def __init__(self, num_targets=4):
+        super(SugarResNet, self).__init__()
+        self.feature_extractor = nn.Sequential(
+            nn.Conv1d(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.ReLU(),
+            ResidualBlock(64, 64),
+            ResidualBlock(64, 128),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten()
+        )
+        self.regressor = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, num_targets)
+        )
+
+    def forward(self, x):
+        features = self.feature_extractor(x)
+        return self.regressor(features)
+
+def prepare_data_v2():
+    print("📂 Đang nạp dữ liệu và thanh lọc...")
+    df_spec = pd.read_csv('Sugar_Concentration_Test_ALL_spectra.csv', index_col=0)
+    X_raw = df_spec.T
+    df_meta = pd.read_csv('Sugar_Concentrations.csv')
+
+    print("🔍 Đang truy quét mẫu lỗi bằng thuật toán Thống kê (Z-score)...")
+    mu = X_raw.mean(axis=0)
+    sigma = X_raw.std(axis=0)
+    z_scores = (X_raw - mu) / (sigma + 1e-8)
+
+    # Tính tỉ lệ điểm dị biệt (|Z| > 4) trên mỗi phổ
+    outlier_ratio = (z_scores.abs() > 4).mean(axis=1)
+
+    # Tách riêng hội "bị trảm" để báo cáo
+    mask_sach = outlier_ratio < 0.01
+    X_bad_df = X_raw[~mask_sach]
+    bad_ratios = outlier_ratio[~mask_sach]
+
+    if not X_bad_df.empty:
+        print("\n🚫 DANH SÁCH MẪU BỊ LOẠI BỎ (OUTLIERS):")
+        print(f"{'Tên mẫu (Sample Name)':<60} | {'Tỉ lệ dị biệt':<15}")
+        print("-" * 80)
+        # Sắp xếp theo tỉ lệ giảm dần cho nó chuyên nghiệp
+        for name, ratio in bad_ratios.sort_values(ascending=False).items():
+            print(f"{name:<60} | {ratio*100:>13.2f}%")
+        print("-" * 80)
+    else:
+        print("\n✨ Không tìm thấy mẫu dị biệt nào. Dữ liệu cực sạch!")
+
+    X_clean_df = X_raw[mask_sach]
+    print(f"✅ Đã dọn rác xong! Giữ lại {len(X_clean_df)} mẫu tốt.")
+
+    # ... (Các phần còn lại của hàm giữ nguyên) ...
+    target_cols = ['Sucrose [ul]', 'Fructose [ul]', 'Maltose [ul]', 'Glucose [ul]']
+    y_list, X_final_list = [], []
+    for sample_name in X_clean_df.index:
+        try:
+            parts = sample_name.split('_')
+            cell_id = f"{parts[4]}_{parts[5]}"
+            row = df_meta[df_meta['Cell Number'] == cell_id]
+            if not row.empty:
+                y_list.append(row[target_cols].values[0])
+                X_final_list.append(X_clean_df.loc[sample_name].values)
+        except: continue
+    X_final = np.array(X_final_list)
+    y_final = np.array(y_list)
+    X_despiked = median_filter(X_final, size=(1, 3))
+    d1 = savgol_filter(X_despiked, window_length=15, polyorder=3, deriv=1)
+    d2 = savgol_filter(X_despiked, window_length=15, polyorder=3, deriv=2)
+    def snv(data):
+        return (data - np.mean(data, axis=1, keepdims=True)) / (np.std(data, axis=1, keepdims=True) + 1e-8)
+    X_processed = np.stack([snv(X_despiked), snv(d1), snv(d2)], axis=1)
+    y_scaled = y_final / 375.0
+    return train_test_split(X_processed, y_scaled, test_size=0.15, random_state=42)
+
+# --- HUẤN LUYỆN ---
+(X_train, X_test, y_train, y_test_scaled) = prepare_data_v2()
+
+train_ds = TensorDataset(torch.tensor(X_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32))
+train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+
+model = SugarResNet().to(device)
+criterion = nn.L1Loss()
+optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
+
+print("\n--- Bắt đầu huấn luyện ResNet v2.2 ---")
+for epoch in range(120):
+    model.train()
+    epoch_loss = 0
+    for inputs, targets in train_loader:
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+
+    avg_loss = epoch_loss / len(train_loader)
+    scheduler.step(avg_loss)
+    if (epoch + 1) % 20 == 0:
+        print(f"🔥 Epoch {epoch + 1:03d} | Loss: {avg_loss:.6f} | LR: {optimizer.param_groups[0]['lr']}")
+
+# --- ĐÁNH GIÁ ---
+model.eval()
+with torch.no_grad():
+    X_test_torch = torch.tensor(X_test, dtype=torch.float32).to(device)
+    preds_scaled = model(X_test_torch).cpu().numpy()
+    preds_ul = np.maximum(preds_scaled * 375.0, 0)
+    y_test_ul = y_test_scaled * 375.0
+
+# In bảng thống kê hiệu năng
+sugar_names = ['Sucrose', 'Fructose', 'Maltose', 'Glucose']
+print("\n" + "="*50)
+print(f"{'LOẠI ĐƯỜNG':<12} | {'MAE (ul)':<10} | {'Correlation R':<10}")
+print("-"*50)
+
+total_mae = 0
+for i, name in enumerate(sugar_names):
+    mae = np.mean(np.abs(y_test_ul[:, i] - preds_ul[:, i]))
+    r = np.corrcoef(y_test_ul[:, i], preds_ul[:, i])[0, 1]
+    total_mae += mae
+    print(f"{name:<12} | {mae:<10.2f} | {r:<10.4f}")
+
+print("-"*50)
+print(f"{'TRUNG BÌNH':<12} | {total_mae/4:<10.2f} | R_avg: {np.mean([np.corrcoef(y_test_ul[:, j], preds_ul[:, j])[0, 1] for j in range(4)]):.4f}")
+print("="*50)
+
+# Vẽ biểu đồ
+plt.figure(figsize=(18, 4))
+for i in range(4):
+    plt.subplot(1, 4, i + 1)
+    r_val = np.corrcoef(y_test_ul[:, i], preds_ul[:, i])[0, 1]
+    plt.scatter(y_test_ul[:, i], preds_ul[:, i], alpha=0.4, color='darkorange')
+    plt.plot([0, 150], [0, 150], 'k--', lw=1)
+    plt.title(f"{sugar_names[i]}\nR={r_val:.3f}")
+    plt.xlabel("Thực tế (ul)")
+    plt.ylabel("Dự đoán (ul)")
+    plt.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+torch.save(model.state_dict(), 'raman_resnet_v2.2.pth')
+print("\n✅ Đã lưu model v2.2 thành công!")
