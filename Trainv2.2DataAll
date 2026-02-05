@@ -1,0 +1,135 @@
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+from scipy.signal import savgol_filter
+from scipy.ndimage import median_filter
+import matplotlib.pyplot as plt
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"🚀 Chế độ thực nghiệm: Train trên toàn bộ dữ liệu sạch | Device: {device}")
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(ResidualBlock, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(),
+            nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels)
+        )
+        self.shortcut = nn.Sequential()
+        if in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels, out_channels, kernel_size=1),
+                nn.BatchNorm1d(out_channels)
+            )
+    def forward(self, x):
+        return torch.relu(self.conv(x) + self.shortcut(x))
+
+class SugarResNet(nn.Module):
+    def __init__(self, num_targets=4):
+        super(SugarResNet, self).__init__()
+        self.feature_extractor = nn.Sequential(
+            nn.Conv1d(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.ReLU(),
+            ResidualBlock(64, 64),
+            ResidualBlock(64, 128),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten()
+        )
+        self.regressor = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, num_targets)
+        )
+    def forward(self, x):
+        features = self.feature_extractor(x)
+        return self.regressor(features)
+
+def prepare_full_data():
+    df_spec = pd.read_csv('Sugar_Concentration_Test_ALL_spectra.csv', index_col=0)
+    X_raw = df_spec.T
+    df_meta = pd.read_csv('Sugar_Concentrations.csv')
+
+    mu, sigma = X_raw.mean(axis=0), X_raw.std(axis=0)
+    z_scores = (X_raw - mu) / (sigma + 1e-8)
+    outlier_ratio = (z_scores.abs() > 4).mean(axis=1)
+
+    mask_sach = outlier_ratio < 0.01
+    bad_samples = outlier_ratio[~mask_sach]
+
+    if not bad_samples.empty:
+        print(f"\n🚫 Đã phát hiện và loại bỏ {len(bad_samples)} mẫu lỗi bằng Z-score.")
+
+    X_clean_df = X_raw[mask_sach]
+    target_cols = ['Sucrose [ul]', 'Fructose [ul]', 'Maltose [ul]', 'Glucose [ul]']
+    y_list, X_final_list = [], []
+
+    for sample_name in X_clean_df.index:
+        try:
+            parts = sample_name.split('_')
+            cell_id = f"{parts[4]}_{parts[5]}"
+            row = df_meta[df_meta['Cell Number'] == cell_id]
+            if not row.empty:
+                y_list.append(row[target_cols].values[0])
+                X_final_list.append(X_clean_df.loc[sample_name].values)
+        except: continue
+
+    X_final, y_final = np.array(X_final_list), np.array(y_list)
+    X_despiked = median_filter(X_final, size=(1, 3))
+    d1 = savgol_filter(X_despiked, window_length=15, polyorder=3, deriv=1)
+    d2 = savgol_filter(X_despiked, window_length=15, polyorder=3, deriv=2)
+
+    def snv(data):
+        return (data - np.mean(data, axis=1, keepdims=True)) / (np.std(data, axis=1, keepdims=True) + 1e-8)
+
+    X_processed = np.stack([snv(X_despiked), snv(d1), snv(d2)], axis=1)
+    return X_processed, y_final / 375.0
+
+# --- THỰC THI TRAIN ---
+X_all, y_all_scaled = prepare_full_data()
+train_ds = TensorDataset(torch.tensor(X_all, dtype=torch.float32), torch.tensor(y_all_scaled, dtype=torch.float32))
+train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+
+model = SugarResNet().to(device)
+criterion = nn.L1Loss()
+optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
+
+for epoch in range(120):
+    model.train()
+    epoch_loss = 0
+    for inputs, targets in train_loader:
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+    scheduler.step(epoch_loss / len(train_loader))
+    if (epoch + 1) % 40 == 0:
+        print(f"🔥 Epoch {epoch + 1:03d} | Loss: {epoch_loss / len(train_loader):.6f}")
+
+# --- ĐÁNH GIÁ TRÊN CHÍNH DỮ LIỆU ĐÃ HỌC ---
+model.eval()
+with torch.no_grad():
+    X_torch = torch.tensor(X_all, dtype=torch.float32).to(device)
+    preds = model(X_torch).cpu().numpy() * 375.0
+    actuals = y_all_scaled * 375.0
+
+sugar_names = ['Sucrose', 'Fructose', 'Maltose', 'Glucose']
+print("\n" + "="*50)
+print(f"{'LOẠI ĐƯỜNG':<12} | {'MAE (ul)':<10} | {'Correlation R':<10}")
+print("-"*50)
+for i in range(4):
+    mae = np.mean(np.abs(actuals[:, i] - preds[:, i]))
+    r = np.corrcoef(actuals[:, i], preds[:, i])[0, 1]
+    print(f"{sugar_names[i]:<12} | {mae:<10.2f} | {r:<10.4f}")
+print("="*50)
+
+torch.save(model.state_dict(), 'raman_resnet_experiment.pth')
