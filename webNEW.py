@@ -192,8 +192,10 @@ if uploaded_file and selected_sample:
                     "MAE (ul)": [1.90, 2.15, 2.20, 3.38], 
                     "Correlation (R)": [0.9985, 0.9982, 0.9980, 0.9954], 
                     "Trạng thái": ["Ổn định", "Nhạy", "Ổn định", "Rất tốt"]
+                })
 else:
     st.info("👋 Chào đại ca! Hãy tải file CSV lên để trải nghiệm bộ lọc tìm kiếm mới.")
+
 
 
 
