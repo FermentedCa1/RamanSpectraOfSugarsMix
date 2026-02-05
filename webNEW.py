@@ -187,13 +187,14 @@ if uploaded_file and selected_sample:
 
     # Bảng Metrics hiệu năng v2.1
     with st.expander("📝 Thông số hiệu năng hệ thống (Model v2.1)"):
-        st.table(pd.DataFrame({
-            "Đường": sugars,
-            "MAE": [1,9, 2,15, 2,2, 3,38],
-            "R-squared": [0.9985, 0.9982, 0.998, 0.9954]
-        }))
+            metrics = pd.DataFrame({
+                    "Đường": sugars,
+                    "MAE (ul)": [1.90, 2.15, 2.20, 3.38], 
+                    "Correlation (R)": [0.9985, 0.9982, 0.9980, 0.9954], 
+                    "Trạng thái": ["Ổn định", "Nhạy", "Ổn định", "Rất tốt"]
 else:
     st.info("👋 Chào đại ca! Hãy tải file CSV lên để trải nghiệm bộ lọc tìm kiếm mới.")
+
 
 
 
